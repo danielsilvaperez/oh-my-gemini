@@ -57,9 +57,15 @@ async function verifyCommands(commands: string[], cwd: string) {
   return results;
 }
 
-function selectVerificationCommands(requested: string[], allowed: string[]): string[] {
+function selectVerificationCommands(requested: string[], allowed: string[]): string[] | null {
   const safeRequested = requested.filter((command) => allowed.includes(command));
-  return safeRequested.length ? safeRequested : allowed;
+  if (safeRequested.length) {
+    return safeRequested;
+  }
+  if (!requested.length && allowed.length) {
+    return allowed;
+  }
+  return null;
 }
 
 export async function runRalph(paths: OmgPaths, task: string, options: RalphOptions = {}): Promise<RalphState> {
@@ -136,7 +142,14 @@ export async function runRalph(paths: OmgPaths, task: string, options: RalphOpti
       ralphState.status = 'blocked';
     } else {
       const commands = selectVerificationCommands(nextStep.verificationCommands, repoCommands.defaultVerification);
-      verification = await verifyCommands(commands, paths.projectRoot);
+      verification = commands
+        ? await verifyCommands(commands, paths.projectRoot)
+        : [{
+          command: nextStep.verificationCommands.join(', ') || '(none)',
+          code: 1,
+          stdout: '',
+          stderr: 'No safe verification commands were available for this step.',
+        }];
       const passed = verification.every((result) => result.code === 0);
       if (passed) {
         nextStep.status = 'completed';

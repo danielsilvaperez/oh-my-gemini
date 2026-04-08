@@ -57,6 +57,7 @@ test('parseVerificationCommand accepts safe package-manager commands only', () =
   assert.deepEqual(parseVerificationCommand('pnpm test'), { command: 'pnpm', args: ['test'] });
   assert.deepEqual(parseVerificationCommand('yarn build'), { command: 'yarn', args: ['build'] });
   assert.throws(() => parseVerificationCommand('npm run lint && rm -rf /'), /Unsafe verification command rejected/);
+  assert.throws(() => parseVerificationCommand('echo hacked'), /Unsafe verification command rejected/);
 });
 
 test('writeText replaces files without leaving temp artifacts behind', async () => {
