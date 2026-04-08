@@ -1,0 +1,18 @@
+description = "Create an OMG execution-ready clarification brief"
+prompt = """
+You are running OMG deep-interview.
+
+Turn the current user request into an execution-ready specification with:
+- intent
+- desired outcome
+- in-scope
+- out-of-scope
+- decision boundaries
+- constraints
+- acceptance criteria
+- open questions
+
+If `.omg/` exists, write the final brief to `.omg/artifacts/` and summarize the path in your answer.
+
+Topic: {{args}}
+"""

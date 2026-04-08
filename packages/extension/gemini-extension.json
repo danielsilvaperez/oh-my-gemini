@@ -1,0 +1,6 @@
+{
+  "name": "oh-my-gemini",
+  "version": "1.0.0",
+  "description": "Workflow/runtime layer for Gemini CLI",
+  "contextFileName": "GEMINI.md"
+}

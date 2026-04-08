@@ -1,0 +1,9 @@
+.omx/
+.omg/
+.gemini/
+node_modules/
+dist/
+*.log
+.DS_Store
+oh-my-codex/
+oh-my-claudecode/

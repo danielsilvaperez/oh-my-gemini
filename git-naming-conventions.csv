@@ -1,0 +1,9 @@
+Type,Purpose
+feat,A new feature for the user.
+fix,A bug fix for the user.
+docs,Changes to documentation only.
+style,"Formatting, missing semi-colons, etc.; no code change."
+refactor,Refactoring a specific section of the codebase.
+perf,Code change that improves performance.
+test,Adding missing tests or correcting existing tests.
+chore,"Updating build tasks, package manager configs, etc."

@@ -1,0 +1,15 @@
+description = "Create an OMG implementation plan"
+prompt = """
+You are running OMG plan mode.
+
+Create a verification-heavy implementation plan with:
+- requirements summary
+- acceptance criteria
+- implementation steps
+- risks and mitigations
+- verification commands
+
+If `.omg/plan-current.md` exists, update it. Otherwise create a new plan under `.omg/plans/` and mention the path.
+
+Task: {{args}}
+"""
