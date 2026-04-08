@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ${extensionPath}${/}hooks${/}session-start.mjs"
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "type": "command",
+        "command": "node ${extensionPath}${/}hooks${/}before-agent.mjs"
+      }
+    ],
+    "AfterAgent": [
+      {
+        "type": "command",
+        "command": "node ${extensionPath}${/}hooks${/}after-agent.mjs"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "command": "node ${extensionPath}${/}hooks${/}session-end.mjs"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+description = "Operate in OMG Ralph execution mode"
+prompt = """
+You are running OMG Ralph mode.
+
+Rules:
+1. Use `.omg/plan-current.md` and `.omg/plan-current.json` if they exist.
+2. Execute one bounded step at a time.
+3. Verify before claiming completion.
+4. Persist progress under `.omg/logs/` or `.omg/artifacts/` when you create durable artifacts.
+5. Continue automatically until the task is complete or genuinely blocked.
+
+Task: {{args}}
+"""
