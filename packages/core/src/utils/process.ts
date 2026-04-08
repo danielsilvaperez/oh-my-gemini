@@ -35,7 +35,27 @@ export async function runCommand(command: string, args: string[] = [], options: 
   });
 }
 
-export async function runShell(command: string, options: Omit<RunOptions, 'shell'> = {}): Promise<CommandResult> {
+export function shellEscapeArg(value: string): string {
+  if (!value.length) {
+    return "''";
+  }
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export const shellQuote = shellEscapeArg;
+
+/**
+ * Intentionally shells out for trusted operator-authored commands only.
+ * Do not pass model-generated or unsanitized user input here.
+ */
+export async function runTrustedShell(command: string, options: Omit<RunOptions, 'shell'> = {}): Promise<CommandResult> {
+  return await runCommand(command, [], { ...options, shell: true });
+}
+
+/**
+ * Execute a shell command string that the user explicitly asked to run.
+ */
+export async function runUserShell(command: string, options: Omit<RunOptions, 'shell'> = {}): Promise<CommandResult> {
   return await runCommand(command, [], { ...options, shell: true });
 }
 

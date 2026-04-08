@@ -6,7 +6,7 @@ import { GeminiRunner } from './gemini-runner.js';
 import { buildRalphExecutePrompt, planToMarkdown } from './prompts.js';
 import { detectRepoCommands } from './repo.js';
 import { appendJsonl, readJson, writeJson, writeText } from './utils/fs.js';
-import { runShell } from './utils/process.js';
+import { runCommand } from './utils/process.js';
 import { runPlan } from './plan.js';
 
 const EXECUTION_SCHEMA = z.object({
@@ -22,12 +22,44 @@ export interface RalphOptions {
   maxStepRetries?: number;
 }
 
+export function parseVerificationCommand(command: string): { command: string; args: string[] } {
+  const trimmed = command.trim();
+  let match = /^npm\s+run\s+([\w:-]+)$/.exec(trimmed);
+  if (match) {
+    return { command: 'npm', args: ['run', match[1]] };
+  }
+  match = /^pnpm\s+([\w:-]+)$/.exec(trimmed);
+  if (match) {
+    return { command: 'pnpm', args: [match[1]] };
+  }
+  match = /^yarn\s+([\w:-]+)$/.exec(trimmed);
+  if (match) {
+    return { command: 'yarn', args: [match[1]] };
+  }
+  throw new Error(`Unsafe verification command rejected: ${command}`);
+}
+
 async function verifyCommands(commands: string[], cwd: string) {
   const results = [];
   for (const command of commands) {
-    results.push(await runShell(command, { cwd }));
+    try {
+      const parsed = parseVerificationCommand(command);
+      results.push(await runCommand(parsed.command, parsed.args, { cwd }));
+    } catch (error) {
+      results.push({
+        command,
+        code: 1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   return results;
+}
+
+function selectVerificationCommands(requested: string[], allowed: string[]): string[] {
+  const safeRequested = requested.filter((command) => allowed.includes(command));
+  return safeRequested.length ? safeRequested : allowed;
 }
 
 export async function runRalph(paths: OmgPaths, task: string, options: RalphOptions = {}): Promise<RalphState> {
@@ -103,7 +135,7 @@ export async function runRalph(paths: OmgPaths, task: string, options: RalphOpti
       decision = 'blocked';
       ralphState.status = 'blocked';
     } else {
-      const commands = nextStep.verificationCommands.length ? nextStep.verificationCommands : repoCommands.defaultVerification;
+      const commands = selectVerificationCommands(nextStep.verificationCommands, repoCommands.defaultVerification);
       verification = await verifyCommands(commands, paths.projectRoot);
       const passed = verification.every((result) => result.code === 0);
       if (passed) {

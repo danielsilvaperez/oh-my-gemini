@@ -17,6 +17,7 @@ import {
 import { isNonTrivialTask, selectMode } from '../../core/src/modes.js';
 import { renderTeamStatus, resumeTeam, runTeamWorker, shutdownTeam, startTeam } from '../../core/src/team.js';
 import { appendJsonl, writeText } from '../../core/src/utils/fs.js';
+import { shellQuote } from '../../core/src/utils/process.js';
 
 function printChecks(checks: Array<{ name: string; ok: boolean; detail: string; severity?: string }>) {
   for (const check of checks) {
@@ -183,10 +184,12 @@ export async function runCli(argv = process.argv): Promise<void> {
 
 async function launchTmux(paths: ReturnType<typeof resolveOmgPaths>, mode: 'smart' | 'madmax' | 'high', task: string): Promise<void> {
   const scriptPath = join(paths.projectOmgDir, 'artifacts', `tmux-launch-${Date.now()}.sh`);
-  const entry = JSON.stringify(paths.cliEntrypoint);
+  const entry = shellQuote(paths.cliEntrypoint);
+  const safeProjectRoot = shellQuote(paths.projectRoot);
+  const modeFlag = mode === 'madmax' ? '--madmax ' : '';
   const script = task
-    ? `#!/usr/bin/env bash\nset -euo pipefail\ncd ${JSON.stringify(paths.projectRoot)}\nnode ${entry} ${mode === 'high' ? 'ralph' : ''} ${task ? JSON.stringify(task) : ''}\n`
-    : `#!/usr/bin/env bash\nset -euo pipefail\ncd ${JSON.stringify(paths.projectRoot)}\nOMG_MODE=${JSON.stringify(mode)} OMG_HOME=${JSON.stringify(paths.globalHomeDir)} OMG_PROJECT_DIR=${JSON.stringify(paths.projectRoot)} GEMINI_PROJECT_DIR=${JSON.stringify(paths.projectRoot)} gemini\n`;
+    ? `#!/usr/bin/env bash\nset -euo pipefail\ncd -- ${safeProjectRoot}\nexec node ${entry} ${mode === 'high' ? 'ralph ' : modeFlag}${shellQuote(task)}\n`
+    : `#!/usr/bin/env bash\nset -euo pipefail\ncd -- ${safeProjectRoot}\nexec env OMG_MODE=${shellQuote(mode)} OMG_HOME=${shellQuote(paths.globalHomeDir)} OMG_PROJECT_DIR=${safeProjectRoot} GEMINI_PROJECT_DIR=${safeProjectRoot} gemini\n`;
   await writeText(scriptPath, script);
   await appendJsonl(join(paths.projectOmgDir, 'logs', 'tmux.jsonl'), { at: new Date().toISOString(), mode, task, scriptPath });
   await runTaskTmux(scriptPath, `omg-${mode}-${Date.now()}`);

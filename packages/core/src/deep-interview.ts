@@ -111,13 +111,8 @@ function transcriptMarkdown(topic: string, rounds: InterviewRound[]): string {
   ].join('\n');
 }
 
-async function askInteractiveQuestion(question: string): Promise<string> {
-  const rl = createInterface({ input, output: terminalOutput });
-  try {
-    return (await rl.question(`${question}\n> `)).trim();
-  } finally {
-    rl.close();
-  }
+async function askInteractiveQuestion(rl: ReturnType<typeof createInterface>, question: string): Promise<string> {
+  return (await rl.question(`${question}\n> `)).trim();
 }
 
 async function generateSpec(paths: OmgPaths, runner: GeminiRunner, topic: string, repoContext: string, rounds: InterviewRound[], mode: OmgMode): Promise<DeepInterviewSpec> {
@@ -142,28 +137,33 @@ export async function runDeepInterview(
   const rounds: InterviewRound[] = [];
 
   if (interactive) {
-    for (let round = 1; round <= maxRounds; round += 1) {
-      const next = await runner.runPromptJson(
-        buildQuestionPrompt(topic, repoContext, rounds, maxRounds),
-        QUESTION_SCHEMA,
-        { mode },
-      );
-      if (next.shouldStop && rounds.length >= 2) {
-        break;
+    const rl = createInterface({ input, output: terminalOutput });
+    try {
+      for (let round = 1; round <= maxRounds; round += 1) {
+        const next = await runner.runPromptJson(
+          buildQuestionPrompt(topic, repoContext, rounds, maxRounds),
+          QUESTION_SCHEMA,
+          { mode },
+        );
+        if (next.shouldStop && rounds.length >= 2) {
+          break;
+        }
+        console.log(`\nRound ${round} | Focus: ${next.focus} | Ambiguity: ${Math.round(next.ambiguity * 100)}%`);
+        const answer = await askInteractiveQuestion(rl, next.question);
+        if (!answer) {
+          break;
+        }
+        rounds.push({
+          round,
+          question: next.question,
+          rationale: next.rationale,
+          focus: next.focus,
+          ambiguity: next.ambiguity,
+          answer,
+        });
       }
-      console.log(`\nRound ${round} | Focus: ${next.focus} | Ambiguity: ${Math.round(next.ambiguity * 100)}%`);
-      const answer = await askInteractiveQuestion(next.question);
-      if (!answer) {
-        break;
-      }
-      rounds.push({
-        round,
-        question: next.question,
-        rationale: next.rationale,
-        focus: next.focus,
-        ambiguity: next.ambiguity,
-        answer,
-      });
+    } finally {
+      rl.close();
     }
   }
 

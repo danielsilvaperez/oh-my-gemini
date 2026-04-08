@@ -1,6 +1,6 @@
-import { access, appendFile, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { access, appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export async function ensureDir(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
@@ -37,11 +37,14 @@ export async function readText(path: string, fallback = ''): Promise<string> {
 
 export async function writeText(path: string, content: string): Promise<void> {
   await ensureDir(dirname(path));
-  const temp = `${path}.tmp-${Date.now()}`;
+  const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
   await writeFile(temp, content, 'utf8');
-  await rm(path, { force: true });
-  await copyFile(temp, path);
-  await rm(temp, { force: true });
+  try {
+    await rename(temp, path);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
 }
 
 export async function readJson<T>(path: string, fallback: T): Promise<T> {
@@ -110,4 +113,9 @@ export function renderSection(title: string, lines: string[]): string {
 
 export function safeBaseName(path: string): string {
   return basename(path).replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+export function isPathInside(basePath: string, candidatePath: string): boolean {
+  const rel = relative(resolve(basePath), resolve(candidatePath));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }

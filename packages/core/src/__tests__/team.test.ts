@@ -11,3 +11,7 @@ test('buildWorkerAssignments creates a verification lane', () => {
   assert.equal(assignments[0]?.lane, 'primary-delivery');
   assert.equal(assignments[2]?.lane, 'verification');
 });
+
+test('parseTeamSpec rejects malformed specs', () => {
+  assert.throws(() => parseTeamSpec('executor:3'), /Team spec must look like 3:executor/);
+});
