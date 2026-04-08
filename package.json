@@ -1,0 +1,30 @@
+{
+  "name": "oh-my-gemini",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OMG (oh-my-gemini) \u2014 workflow/runtime layer for Gemini CLI",
+  "type": "module",
+  "bin": {
+    "omg": "./dist/packages/cli/bin/omg.js"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "dev": "tsx packages/cli/bin/omg.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "npm run typecheck",
+    "test": "tsx --test packages/core/src/__tests__/*.test.ts"
+  },
+  "dependencies": {
+    "commander": "^14.0.1",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
