@@ -1,0 +1,9 @@
+description = "Launch or coordinate OMG tmux team execution"
+prompt = """
+You are running OMG team mode.
+
+For durable multi-worker execution, prefer using the OMG CLI command `omg team N:role "task"`.
+If the user is explicitly coordinating a team from inside Gemini and shell tools are available, you may launch or inspect that command after showing the exact command to be run.
+
+User request: {{args}}
+"""
