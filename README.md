@@ -133,12 +133,23 @@ omg sparkshell "git status --short"
   mode.json
   plan-current.md
   plan-current.json
+  test-spec-current.md
+  test-spec-current.json
+  project-memory.json
+  notepad.md
+  context/
+  state/
+  sessions/
   plans/
   logs/
   team/
   artifacts/
   skills/
 ```
+
+Notable durable runtime files:
+- `.omg/state/*.json` — workflow/runtime mode state snapshots
+- `.omg/logs/trace.jsonl` — lightweight runtime trace of session, planning, Ralph, team, and hook events
 
 ## Ralph loop
 
@@ -151,6 +162,8 @@ omg sparkshell "git status --short"
 5. Continue, retry, or stop based on structured execution + verification state.
 
 It does **not** rely on brittle string matching like “contains complete”.
+
+`omg plan` now writes both durable implementation planning artifacts and a companion test-spec artifact so Ralph and operators have an explicit verification contract to work from.
 
 ## Team mode
 

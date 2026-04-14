@@ -1,8 +1,14 @@
 import { chmod } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
-import type { OmgPaths, TeamManifest, TeamStatusReport, TeamWorkerAssignment, TeamWorkerStatus } from './types.js';
+import type { OmgPaths, TeamAutoFixResult, TeamLoopResult, TeamManifest, TeamReconcileResult, TeamStatusReport, TeamWorkerAssignment, TeamWorkerStatus } from './types.js';
 import { OmgContext } from './context.js';
+import { updateModeState } from './state.js';
+import { computeTeamControllerDecision, shouldSpawnFixPass } from './team-controller.js';
+import { decideTeamLoopAction } from './team-loop.js';
+import { appendTeamMailboxMessage, readRecentTeamMailbox, summarizeTeamWorkers } from './team-mailbox.js';
+import { readTeamProgressEvidence, writeTeamProgressEvidence } from './team-progress.js';
+import { appendTraceEvent } from './trace.js';
 import { parseGeminiJsonPayload } from './utils/json.js';
 import { appendJsonl, ensureDir, isPathInside, readJson, slugify, tailFile, writeJson, writeText } from './utils/fs.js';
 import { runCommand, shellQuote, spawnInteractive } from './utils/process.js';
@@ -20,6 +26,11 @@ interface TeamLaunchSpec {
   role: string;
 }
 
+interface StartTeamOptions {
+  parentTeamId?: string;
+  fixIteration?: number;
+}
+
 interface TeamWorkerRuntimeConfig {
   teamId: string;
   task: string;
@@ -32,6 +43,29 @@ interface TeamWorkerRuntimeConfig {
 }
 
 type TeamWorkerResult = z.infer<typeof WORKER_RESULT_SCHEMA>;
+
+export function deriveTeamPhase(
+  workers: TeamWorkerStatus[],
+  tmuxSessionAlive: boolean,
+): TeamManifest['currentPhase'] {
+  if (!workers.length) return tmuxSessionAlive ? 'planning' : 'stopped';
+  if (workers.every((worker) => worker.status === 'completed')) return 'complete';
+  if (workers.some((worker) => worker.status === 'failed')) return 'fixing';
+  if (workers.some((worker) => worker.status === 'running' && worker.lane === 'verification')) return 'verifying';
+  if (workers.some((worker) => worker.status === 'running')) return 'executing';
+  if (tmuxSessionAlive) return 'planning';
+  return 'stopped';
+}
+
+export function deriveTeamStatus(
+  workers: TeamWorkerStatus[],
+  tmuxSessionAlive: boolean,
+): TeamManifest['status'] {
+  if (workers.every((worker) => worker.status === 'completed')) return 'completed';
+  if (workers.some((worker) => worker.status === 'failed')) return tmuxSessionAlive ? 'running' : 'failed';
+  if (tmuxSessionAlive) return 'running';
+  return 'stopped';
+}
 
 export function parseTeamSpec(input: string): TeamLaunchSpec {
   const match = /^(\d+):(\w[\w-]*)$/.exec(input.trim());
@@ -54,6 +88,19 @@ export function buildWorkerAssignments(count: number, role: string, task: string
     }
   }
   return assignments;
+}
+
+export function buildFixPassTask(manifest: TeamManifest): string {
+  const failedWorkers = manifest.workers.filter((worker) => worker.status === 'failed');
+  const failedSummary = failedWorkers.length
+    ? failedWorkers.map((worker) => `${worker.id}(${worker.lane}): ${worker.summary ?? 'failed without summary'}`).join(' | ')
+    : 'previous team stopped before completion';
+  return [
+    `Follow-up fix pass for team ${manifest.id}.`,
+    `Original task: ${manifest.task}`,
+    `Focus on unresolved issues from the previous run: ${failedSummary}.`,
+    'Implement the needed fixes, then re-run verification and summarize remaining risks.',
+  ].join(' ');
 }
 
 function teamDir(paths: OmgPaths, teamId: string): string {
@@ -152,11 +199,12 @@ function workerResultLines(worker: TeamWorkerStatus): string[] {
   return lines;
 }
 
-export async function startTeam(paths: OmgPaths, spec: string, task: string): Promise<TeamManifest> {
+async function startTeamInternal(paths: OmgPaths, spec: string, task: string, options: StartTeamOptions = {}): Promise<TeamManifest> {
   const { count, role } = parseTeamSpec(spec);
   const context = new OmgContext(paths);
+  const sessionId = `team-${Date.now()}`;
   await context.startSession({
-    sessionId: `team-${Date.now()}`,
+    sessionId,
     mode: 'madmax',
     startedAt: new Date().toISOString(),
     cwd: paths.projectRoot,
@@ -206,6 +254,9 @@ export async function startTeam(paths: OmgPaths, spec: string, task: string): Pr
     count,
     cwd: paths.projectRoot,
     startedAt: new Date().toISOString(),
+    parentTeamId: options.parentTeamId,
+    fixIteration: options.fixIteration,
+    currentPhase: 'planning',
     status: 'starting',
     workers,
   };
@@ -231,6 +282,7 @@ export async function startTeam(paths: OmgPaths, spec: string, task: string): Pr
 
   const paneIds = await resolvePaneIds(sessionName);
   manifest.status = 'running';
+  manifest.currentPhase = 'executing';
   manifest.workers = manifest.workers.map((worker, index) => ({
     ...worker,
     tmuxPane: paneIds[index],
@@ -244,7 +296,36 @@ export async function startTeam(paths: OmgPaths, spec: string, task: string): Pr
   }
   await writeJson(join(teamDir(paths, teamId), 'manifest.json'), manifest);
   await appendJsonl(join(teamDir(paths, teamId), 'events.jsonl'), { at: new Date().toISOString(), kind: 'team-started', manifest });
+  await updateModeState(paths, 'team', {
+    active: true,
+    currentPhase: manifest.currentPhase,
+    startedAt: manifest.startedAt,
+    updatedAt: new Date().toISOString(),
+    task,
+    sessionId,
+    metadata: { teamId, sessionName, workerCount: count, role },
+  });
+  await appendTraceEvent(paths, {
+    at: new Date().toISOString(),
+    kind: 'team-started',
+    mode: 'team',
+    sessionId,
+    task,
+    detail: { teamId, sessionName, workerCount: count, role },
+  });
+  await appendTeamMailboxMessage(paths, {
+    at: new Date().toISOString(),
+    teamId,
+    kind: 'team-started',
+    message: `Team started with ${count} worker(s) for role ${role}.`,
+  });
+  const report = { manifest, tmuxSessionAlive: true };
+  await writeTeamProgressEvidence(paths, report);
   return manifest;
+}
+
+export async function startTeam(paths: OmgPaths, spec: string, task: string): Promise<TeamManifest> {
+  return await startTeamInternal(paths, spec, task);
 }
 
 export async function readTeamStatus(paths: OmgPaths, teamId: string): Promise<TeamStatusReport> {
@@ -261,11 +342,143 @@ export async function readTeamStatus(paths: OmgPaths, teamId: string): Promise<T
     refreshedWorkers.push({ ...worker, ...persisted });
   }
   manifest.workers = refreshedWorkers;
-  if (!tmuxSessionAlive && manifest.status === 'running') {
-    manifest.status = manifest.workers.every((worker) => worker.status === 'completed') ? 'completed' : 'stopped';
-    await writeJson(join(teamDir(paths, teamId), 'manifest.json'), manifest);
+  const decision = computeTeamControllerDecision(manifest, tmuxSessionAlive);
+  manifest.currentPhase = decision.phase;
+  manifest.status = decision.status;
+  await writeJson(join(teamDir(paths, teamId), 'manifest.json'), manifest);
+  await updateModeState(paths, 'team', {
+    active: tmuxSessionAlive || manifest.status === 'running',
+    currentPhase: manifest.currentPhase,
+    updatedAt: new Date().toISOString(),
+    task: manifest.task,
+    metadata: {
+      teamId,
+      status: manifest.status,
+      sessionName: manifest.sessionName,
+      workerCount: manifest.workers.length,
+    },
+  });
+  const report = { manifest, tmuxSessionAlive };
+  await writeTeamProgressEvidence(paths, report);
+  return report;
+}
+
+export async function reconcileTeam(paths: OmgPaths, teamId: string): Promise<TeamReconcileResult> {
+  const report = await readTeamStatus(paths, teamId);
+  const decision = computeTeamControllerDecision(report.manifest, report.tmuxSessionAlive);
+  await appendTeamMailboxMessage(paths, {
+    at: new Date().toISOString(),
+    teamId,
+    kind: 'handoff',
+    message: `Reconciled team state. Phase=${decision.phase} status=${decision.status}. Next action: ${decision.nextAction}.`,
+  });
+  await appendTraceEvent(paths, {
+    at: new Date().toISOString(),
+    kind: 'team-reconciled',
+    mode: 'team',
+    task: report.manifest.task,
+    detail: {
+      teamId,
+      phase: decision.phase,
+      status: decision.status,
+      nextAction: decision.nextAction,
+      shouldAttach: decision.shouldAttach,
+    },
+  });
+  await writeTeamProgressEvidence(paths, report);
+  return { report, decision };
+}
+
+export async function startTeamFixPass(paths: OmgPaths, teamId: string): Promise<TeamManifest> {
+  const { report, decision } = await reconcileTeam(paths, teamId);
+  const fixTask = buildFixPassTask(report.manifest);
+  const fixManifest = await startTeamInternal(
+    paths,
+    `${report.manifest.count}:${report.manifest.role}`,
+    fixTask,
+    {
+      parentTeamId: report.manifest.id,
+      fixIteration: (report.manifest.fixIteration ?? 0) + 1,
+    },
+  );
+  await appendTeamMailboxMessage(paths, {
+    at: new Date().toISOString(),
+    teamId: report.manifest.id,
+    kind: 'handoff',
+    message: `Started fix pass team ${fixManifest.id} from phase ${decision.phase}.`,
+  });
+  await appendTraceEvent(paths, {
+    at: new Date().toISOString(),
+    kind: 'team-fix-pass-started',
+    mode: 'team',
+    task: fixTask,
+    detail: {
+      previousTeamId: report.manifest.id,
+      fixTeamId: fixManifest.id,
+      previousPhase: decision.phase,
+      previousStatus: decision.status,
+    },
+  });
+  return fixManifest;
+}
+
+export async function autofixTeam(paths: OmgPaths, teamId: string): Promise<TeamAutoFixResult> {
+  const previous = await reconcileTeam(paths, teamId);
+  if (!shouldSpawnFixPass(previous.decision, previous.report.tmuxSessionAlive)) {
+    return {
+      previous,
+      fixManifest: null,
+      message: `No automatic fix pass started. Next action: ${previous.decision.nextAction}`,
+    };
   }
-  return { manifest, tmuxSessionAlive };
+  const fixManifest = await startTeamFixPass(paths, teamId);
+  return {
+    previous,
+    fixManifest,
+    message: `Started fix pass team ${fixManifest.id} from ${teamId}.`,
+  };
+}
+
+export async function runTeamLoop(
+  paths: OmgPaths,
+  teamId: string,
+  maxPasses = 3,
+): Promise<TeamLoopResult> {
+  let currentTeamId = teamId;
+  const iterations: TeamLoopResult['iterations'] = [];
+
+  for (let index = 0; index < maxPasses; index += 1) {
+    const reconciled = await reconcileTeam(paths, currentTeamId);
+    const loopAction = decideTeamLoopAction(reconciled.decision, reconciled.report.tmuxSessionAlive);
+    const iteration = {
+      teamId: currentTeamId,
+      phase: reconciled.decision.phase,
+      status: reconciled.decision.status,
+      nextAction: reconciled.decision.nextAction,
+    };
+
+    if (loopAction.shouldSpawnFixPass) {
+      const fixManifest = await startTeamFixPass(paths, currentTeamId);
+      iterations.push({ ...iteration, spawnedFixTeamId: fixManifest.id });
+      currentTeamId = fixManifest.id;
+      continue;
+    }
+
+    iterations.push(iteration);
+    return {
+      finalTeamId: currentTeamId,
+      status: loopAction.status,
+      iterations,
+      message: loopAction.message,
+    };
+  }
+
+  return {
+    finalTeamId: currentTeamId,
+    status: 'stopped',
+    iterations,
+    message: `Reached max passes (${maxPasses}) before the team reached a terminal state.`,
+  };
 }
 
 export async function shutdownTeam(paths: OmgPaths, teamId: string): Promise<TeamStatusReport> {
@@ -281,17 +494,57 @@ export async function shutdownTeam(paths: OmgPaths, teamId: string): Promise<Tea
     lastUpdateAt: new Date().toISOString(),
   }));
   status.manifest.status = status.manifest.workers.every((worker) => worker.status === 'completed') ? 'completed' : 'stopped';
+  status.manifest.currentPhase = status.manifest.status === 'completed' ? 'complete' : 'stopped';
   for (const worker of status.manifest.workers) {
     await writeJson(join(teamDir(paths, teamId), 'workers', worker.id, 'status.json'), worker);
   }
   await writeJson(join(teamDir(paths, teamId), 'manifest.json'), status.manifest);
   await appendJsonl(join(teamDir(paths, teamId), 'events.jsonl'), { at: new Date().toISOString(), kind: 'team-shutdown', status: status.manifest.status });
-  return await readTeamStatus(paths, teamId);
+  await updateModeState(paths, 'team', {
+    active: false,
+    currentPhase: status.manifest.currentPhase,
+    updatedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    task: status.manifest.task,
+    metadata: { teamId, status: status.manifest.status },
+  });
+  await appendTeamMailboxMessage(paths, {
+    at: new Date().toISOString(),
+    teamId,
+    kind: 'team-shutdown',
+    message: `Team shutdown with status ${status.manifest.status}.`,
+  });
+  await appendTraceEvent(paths, {
+    at: new Date().toISOString(),
+    kind: 'team-shutdown',
+    mode: 'team',
+    task: status.manifest.task,
+    detail: { teamId, status: status.manifest.status },
+  });
+  const finalReport = await readTeamStatus(paths, teamId);
+  await writeTeamProgressEvidence(paths, finalReport);
+  return finalReport;
 }
 
 export async function resumeTeam(paths: OmgPaths, teamId: string): Promise<TeamStatusReport> {
-  const status = await readTeamStatus(paths, teamId);
-  if (status.tmuxSessionAlive) {
+  const { report: status, decision } = await reconcileTeam(paths, teamId);
+  await appendTeamMailboxMessage(paths, {
+    at: new Date().toISOString(),
+    teamId,
+    kind: 'handoff',
+    message: status.tmuxSessionAlive
+      ? `Resuming live team session in phase ${status.manifest.currentPhase}. Next action: ${decision.nextAction}.`
+      : `Team session not live; current status is ${status.manifest.status} in phase ${status.manifest.currentPhase}. Next action: ${decision.nextAction}.`,
+  });
+  await appendTraceEvent(paths, {
+    at: new Date().toISOString(),
+    kind: 'team-resume-attempt',
+    mode: 'team',
+    task: status.manifest.task,
+    detail: { teamId, tmuxSessionAlive: status.tmuxSessionAlive, phase: status.manifest.currentPhase },
+  });
+  await writeTeamProgressEvidence(paths, status);
+  if (status.tmuxSessionAlive && decision.shouldAttach) {
     await spawnInteractive('tmux', ['attach', '-t', status.manifest.sessionName]);
   }
   return status;
@@ -312,6 +565,21 @@ export async function runTeamWorker(paths: OmgPaths, configPath: string): Promis
   status.lastUpdateAt = new Date().toISOString();
   status.summary = 'Gemini worker running';
   await writeJson(statusPath, status);
+  await appendTeamMailboxMessage(paths, {
+    at: new Date().toISOString(),
+    teamId: config.teamId,
+    workerId: status.id,
+    lane: status.lane,
+    kind: 'worker-started',
+    message: `${status.id} started in lane ${status.lane}.`,
+  });
+  await appendTraceEvent(paths, {
+    at: new Date().toISOString(),
+    kind: 'team-worker-started',
+    mode: 'team',
+    task: config.task,
+    detail: { teamId: config.teamId, workerId: status.id, lane: status.lane },
+  });
 
   const result = await runCommand('gemini', ['-p', renderWorkerPrompt(config), '--output-format', 'json'], {
     cwd: config.projectRoot,
@@ -347,19 +615,47 @@ export async function runTeamWorker(paths: OmgPaths, configPath: string): Promis
     status.risks = ['Gemini execution returned a non-zero exit code.'];
   }
   await writeJson(statusPath, status);
+  await appendTeamMailboxMessage(paths, {
+    at: new Date().toISOString(),
+    teamId: config.teamId,
+    workerId: status.id,
+    lane: status.lane,
+    kind: status.status === 'failed' ? 'worker-failed' : 'worker-finished',
+    message: `${status.id} ${status.status}. ${status.summary ?? ''}`.trim(),
+  });
+  await appendTraceEvent(paths, {
+    at: new Date().toISOString(),
+    kind: 'team-worker-finished',
+    mode: 'team',
+    task: config.task,
+    detail: {
+      teamId: config.teamId,
+      workerId: status.id,
+      lane: status.lane,
+      status: status.status,
+      summary: status.summary,
+    },
+  });
 }
 
 export async function renderTeamStatus(paths: OmgPaths, teamId: string): Promise<string> {
   const report = await readTeamStatus(paths, teamId);
+  const mailbox = await readRecentTeamMailbox(paths, teamId, 3);
+  const progress = await readTeamProgressEvidence(paths, teamId);
   const header = [
     `Team: ${report.manifest.id}`,
     `Session: ${report.manifest.sessionName}`,
     `Task: ${report.manifest.task}`,
-    `Status: ${report.manifest.status}${report.tmuxSessionAlive ? ' (tmux alive)' : ' (tmux stopped)'}`,
+    `Status: ${report.manifest.status}${report.tmuxSessionAlive ? ' (tmux alive)' : ' (tmux stopped)'} | phase: ${report.manifest.currentPhase}`,
+    summarizeTeamWorkers(report.manifest.workers),
+    progress ? `Next action: ${progress.nextAction}` : 'Next action: inspect team state',
     '',
   ];
   const lines = report.manifest.workers.flatMap((worker) => workerResultLines(worker));
-  return [...header, ...lines].join('\n');
+  const mailboxLines = mailbox.length
+    ? ['', 'Recent mailbox:', ...mailbox.map((entry) => `- [${entry.kind}] ${entry.message}`)]
+    : [];
+  return [...header, ...lines, ...mailboxLines].join('\n');
 }
 
 export async function tailWorkerLog(paths: OmgPaths, teamId: string, workerId: string): Promise<string> {

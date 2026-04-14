@@ -35,10 +35,11 @@ export function buildPlanPrompt(task: string, context: string, repoCommands: Rep
 
   return [
     'You are OMG plan mode.',
-    'Create an implementation plan that is executable, bounded, and verification-heavy.',
+    'Create an implementation plan that is executable, bounded, verification-heavy, and ready for durable execution.',
+    'Include a companion test specification that describes the suites and operator checks needed to prove the work is complete.',
     context ? `Additional context:\n${context}` : '',
     verificationHints,
-    jsonOnly(`{"task":string,"summary":string,"assumptions":string[],"successCriteria":string[],"steps":[{"id":string,"title":string,"description":string,"acceptanceCriteria":string[],"verificationCommands":string[]}],"risks":string[],"verificationCommands":string[],"generatedAt":string}`),
+    jsonOnly(`{"task":string,"summary":string,"assumptions":string[],"successCriteria":string[],"steps":[{"id":string,"title":string,"description":string,"acceptanceCriteria":string[],"verificationCommands":string[]}],"risks":string[],"verificationCommands":string[],"testSpec":{"summary":string,"suites":[{"id":string,"title":string,"objective":string,"commands":string[],"checks":string[]}],"regressionRisks":string[],"generatedAt":string},"generatedAt":string}`),
     `Task: ${task}`,
   ].filter(Boolean).join('\n\n');
 }
@@ -118,6 +119,44 @@ export function planToMarkdown(plan: GeneratedPlan): string {
   lines.push('## Verification Steps');
   lines.push('');
   lines.push(...plan.verificationCommands.map((item) => `- \`${item}\``));
+  lines.push('');
+  lines.push('## Test Spec Summary');
+  lines.push('');
+  lines.push(plan.testSpec.summary);
+  lines.push('');
+  return lines.join('\n');
+}
+
+export function testSpecToMarkdown(plan: GeneratedPlan): string {
+  const lines: string[] = [
+    `# Test Spec: ${plan.task}`,
+    '',
+    plan.testSpec.summary,
+    '',
+    '## Suites',
+    '',
+  ];
+  for (const suite of plan.testSpec.suites) {
+    lines.push(`### ${suite.id} — ${suite.title}`);
+    lines.push('');
+    lines.push(suite.objective);
+    lines.push('');
+    if (suite.commands.length) {
+      lines.push('**Commands**');
+      lines.push('');
+      lines.push(...suite.commands.map((item) => `- \`${item}\``));
+      lines.push('');
+    }
+    if (suite.checks.length) {
+      lines.push('**Checks**');
+      lines.push('');
+      lines.push(...suite.checks.map((item) => `- ${item}`));
+      lines.push('');
+    }
+  }
+  lines.push('## Regression Risks');
+  lines.push('');
+  lines.push(...plan.testSpec.regressionRisks.map((item) => `- ${item}`));
   lines.push('');
   return lines.join('\n');
 }

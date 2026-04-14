@@ -15,7 +15,7 @@ import {
   runTaskPrompt,
 } from './runtime-helpers.js';
 import { isNonTrivialTask, selectMode } from '../../core/src/modes.js';
-import { renderTeamStatus, resumeTeam, runTeamWorker, shutdownTeam, startTeam } from '../../core/src/team.js';
+import { autofixTeam, renderTeamStatus, resumeTeam, runTeamLoop, runTeamWorker, shutdownTeam, startTeam, startTeamFixPass } from '../../core/src/team.js';
 import { appendJsonl, writeText } from '../../core/src/utils/fs.js';
 import { shellQuote } from '../../core/src/utils/process.js';
 
@@ -102,6 +102,9 @@ export async function runCli(argv = process.argv): Promise<void> {
     console.log(`Plan written to:`);
     console.log(`- ${result.markdownPath}`);
     console.log(`- ${result.jsonPath}`);
+    console.log(`Test spec written to:`);
+    console.log(`- ${result.testSpecMarkdownPath}`);
+    console.log(`- ${result.testSpecJsonPath}`);
   });
 
   program.command('ralph').description('Run the persistent Ralph loop').argument('<task...>').option('--max-iterations <n>', 'max Ralph iterations', '20').action(async (taskArgs: string[], options: { maxIterations: string }) => {
@@ -123,6 +126,13 @@ export async function runCli(argv = process.argv): Promise<void> {
     const paths = resolveOmgPaths(process.cwd());
     console.log(await renderTeamStatus(paths, id));
   });
+  team.command('reconcile').argument('<id>').action(async (id: string) => {
+    const paths = resolveOmgPaths(process.cwd());
+    const { reconcileTeam } = await import('../../core/src/team.js');
+    const result = await reconcileTeam(paths, id);
+    console.log(await renderTeamStatus(paths, id));
+    console.log(`\nReconcile decision: ${result.decision.nextAction}`);
+  });
   team.command('resume').argument('<id>').action(async (id: string) => {
     const paths = resolveOmgPaths(process.cwd());
     const status = await resumeTeam(paths, id);
@@ -136,6 +146,31 @@ export async function runCli(argv = process.argv): Promise<void> {
     const status = await shutdownTeam(paths, id);
     console.log(`Team ${id} shutdown.`);
     console.log(await renderTeamStatus(paths, id));
+  });
+  team.command('fix').argument('<id>').action(async (id: string) => {
+    const paths = resolveOmgPaths(process.cwd());
+    const manifest = await startTeamFixPass(paths, id);
+    console.log(`Fix pass team started: ${manifest.id}`);
+    console.log(`parent team: ${id}`);
+    console.log(`tmux session: ${manifest.sessionName}`);
+  });
+  team.command('autofix').argument('<id>').action(async (id: string) => {
+    const paths = resolveOmgPaths(process.cwd());
+    const result = await autofixTeam(paths, id);
+    console.log(result.message);
+    if (result.fixManifest) {
+      console.log(`fix pass team: ${result.fixManifest.id}`);
+      console.log(`tmux session: ${result.fixManifest.sessionName}`);
+    }
+  });
+  team.command('loop').argument('<id>').option('--max-passes <n>', 'maximum chained fix passes', '3').action(async (id: string, options: { maxPasses: string }) => {
+    const paths = resolveOmgPaths(process.cwd());
+    const result = await runTeamLoop(paths, id, Number(options.maxPasses));
+    console.log(`Loop result: ${result.message}`);
+    console.log(`final team: ${result.finalTeamId}`);
+    for (const iteration of result.iterations) {
+      console.log(`- ${iteration.teamId}: ${iteration.phase}/${iteration.status} -> ${iteration.nextAction}${iteration.spawnedFixTeamId ? ` | spawned ${iteration.spawnedFixTeamId}` : ''}`);
+    }
   });
 
   program.command('explore').requiredOption('--prompt <prompt>', 'exploration prompt').action(async (options: { prompt: string }) => {

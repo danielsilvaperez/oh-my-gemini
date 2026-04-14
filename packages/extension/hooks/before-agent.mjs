@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { appendJsonl, ensureProjectDirs, outputJson, readHookInput, resolveProjectRoot } from './shared.mjs';
+import { appendJsonl, ensureProjectDirs, outputJson, readHookInput, readTextPreview, resolveProjectRoot } from './shared.mjs';
 
 const input = readHookInput();
 const projectRoot = resolveProjectRoot(input);
@@ -16,9 +16,14 @@ if (mode === 'high') {
   extra += 'Use lightweight planning when the task is non-trivial and verify important changes. ';
 }
 const planPath = path.join(projectOmg, 'plan-current.md');
+const testSpecPath = path.join(projectOmg, 'test-spec-current.md');
 if (fs.existsSync(planPath)) {
-  const planPreview = fs.readFileSync(planPath, 'utf8').split(/\r?\n/).slice(0, 20).join('\n');
+  const planPreview = readTextPreview(planPath, 4096, 20);
   extra += `Current plan preview:\n${planPreview}`;
+}
+if (fs.existsSync(testSpecPath)) {
+  const testSpecPreview = readTextPreview(testSpecPath, 4096, 14);
+  extra += `\n\nCurrent test spec preview:\n${testSpecPreview}`;
 }
 appendJsonl(path.join(logs, 'hooks.jsonl'), { at: new Date().toISOString(), event: 'BeforeAgent', input });
 outputJson({

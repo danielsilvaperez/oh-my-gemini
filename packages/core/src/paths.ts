@@ -28,17 +28,34 @@ function findProjectRoot(start: string): string {
 export function resolveOmgPaths(cwd = process.cwd()): OmgPaths {
   const workspaceRoot = findProjectRoot(THIS_DIR);
   const projectRoot = findProjectRoot(cwd);
+  const projectOmgDir = join(projectRoot, '.omg');
   const globalHomeDir = join(homedir(), '.omg');
   return {
     workspaceRoot,
     projectRoot,
-    projectOmgDir: join(projectRoot, '.omg'),
+    projectOmgDir,
     projectGeminiDir: join(projectRoot, '.gemini'),
+    projectContextDir: join(projectOmgDir, 'context'),
+    projectStateDir: join(projectOmgDir, 'state'),
+    projectPlansDir: join(projectOmgDir, 'plans'),
+    projectLogsDir: join(projectOmgDir, 'logs'),
+    projectTeamDir: join(projectOmgDir, 'team'),
+    projectArtifactsDir: join(projectOmgDir, 'artifacts'),
+    projectSkillsDir: join(projectOmgDir, 'skills'),
+    projectSessionsDir: join(projectOmgDir, 'sessions'),
+    projectCurrentPlanJsonPath: join(projectOmgDir, 'plan-current.json'),
+    projectCurrentPlanMarkdownPath: join(projectOmgDir, 'plan-current.md'),
+    projectCurrentTestSpecJsonPath: join(projectOmgDir, 'test-spec-current.json'),
+    projectCurrentTestSpecMarkdownPath: join(projectOmgDir, 'test-spec-current.md'),
+    projectMemoryPath: join(projectOmgDir, 'project-memory.json'),
+    projectNotepadPath: join(projectOmgDir, 'notepad.md'),
     globalHomeDir,
     globalLogsDir: join(globalHomeDir, 'logs'),
     globalSessionsDir: join(globalHomeDir, 'sessions'),
     globalSkillsDir: join(globalHomeDir, 'skills'),
     globalArtifactsDir: join(globalHomeDir, 'artifacts'),
+    globalStateDir: join(globalHomeDir, 'state'),
+    globalConfigPath: join(globalHomeDir, 'config.json'),
     extensionRoot: join(workspaceRoot, 'packages', 'extension'),
     cliEntrypoint: join(workspaceRoot, 'dist', 'packages', 'cli', 'bin', 'omg.js'),
   };

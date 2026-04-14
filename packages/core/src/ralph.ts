@@ -1,11 +1,12 @@
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { GeneratedPlan, OmgMode, OmgPaths, RalphIterationRecord, RalphState } from './types.js';
+import type { OmgPaths, RalphIterationRecord, RalphState } from './types.js';
 import { OmgContext } from './context.js';
 import { GeminiRunner } from './gemini-runner.js';
 import { buildRalphExecutePrompt, planToMarkdown } from './prompts.js';
+import { appendRalphRuntimeTrace, readPersistedRalphState, syncRalphRuntimeState, writeRalphState } from './ralph-runtime.js';
 import { detectRepoCommands } from './repo.js';
-import { appendJsonl, readJson, writeJson, writeText } from './utils/fs.js';
+import { appendJsonl, writeJson, writeText } from './utils/fs.js';
 import { runCommand } from './utils/process.js';
 import { runPlan } from './plan.js';
 
@@ -80,53 +81,99 @@ export async function runRalph(paths: OmgPaths, task: string, options: RalphOpti
     task,
   });
 
-  const planResult = await runPlan(paths, task, 'high');
+  const statePath = join(paths.projectArtifactsDir, 'ralph-state.json');
+  const runtime = { sessionId, task, statePath };
+  const existingPlan = await context.readCurrentPlan();
+  const planResult = existingPlan?.task === task
+    ? {
+      plan: existingPlan,
+      markdownPath: paths.projectCurrentPlanMarkdownPath,
+      jsonPath: paths.projectCurrentPlanJsonPath,
+      testSpecMarkdownPath: paths.projectCurrentTestSpecMarkdownPath,
+      testSpecJsonPath: paths.projectCurrentTestSpecJsonPath,
+    }
+    : await runPlan(paths, task, 'high');
   const plan = planResult.plan;
   const repoCommands = await detectRepoCommands(paths);
   const runner = new GeminiRunner(paths);
 
-  const statePath = join(paths.projectOmgDir, 'artifacts', 'ralph-state.json');
   const maxIterations = options.maxIterations ?? 20;
   const maxStepRetries = options.maxStepRetries ?? 2;
-  const ralphState: RalphState = {
-    task,
+  const persistedState = await readPersistedRalphState(statePath);
+  const ralphState: RalphState = persistedState?.task === task && persistedState.status === 'running'
+    ? {
+      ...persistedState,
+      planPath: planResult.markdownPath,
+      planJsonPath: planResult.jsonPath,
+      testSpecPath: planResult.testSpecMarkdownPath,
+      maxIterations,
+      updatedAt: new Date().toISOString(),
+    }
+    : {
+      task,
+      planPath: planResult.markdownPath,
+      planJsonPath: planResult.jsonPath,
+      testSpecPath: planResult.testSpecMarkdownPath,
+      iteration: 0,
+      maxIterations,
+      stepAttempts: {},
+      status: 'running',
+      currentPhase: 'planning',
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      history: [],
+    };
+  await writeRalphState(statePath, ralphState);
+  await syncRalphRuntimeState(paths, runtime, ralphState, {
     planPath: planResult.markdownPath,
-    planJsonPath: planResult.jsonPath,
-    iteration: 0,
-    maxIterations,
-    stepAttempts: {},
-    status: 'running',
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    history: [],
-  };
-  await writeJson(statePath, ralphState);
+    resumed: Boolean(persistedState?.task === task && persistedState.status === 'running'),
+  });
+  await appendRalphRuntimeTrace(paths, runtime, 'ralph-start', {
+    planPath: planResult.markdownPath,
+    resumed: Boolean(persistedState?.task === task && persistedState.status === 'running'),
+  });
 
   while (ralphState.iteration < maxIterations) {
     const nextStep = plan.steps.find((step) => step.status !== 'completed');
     if (!nextStep) {
+      ralphState.currentPhase = 'verifying';
+      ralphState.updatedAt = new Date().toISOString();
+      await syncRalphRuntimeState(paths, runtime, ralphState, {
+        finalVerification: repoCommands.defaultVerification,
+      });
       const finalCommands = repoCommands.defaultVerification;
       const verification = finalCommands.length ? await verifyCommands(finalCommands, paths.projectRoot) : [];
       const allPassed = verification.every((result) => result.code === 0);
       ralphState.status = allPassed ? 'complete' : 'blocked';
+      ralphState.currentPhase = allPassed ? 'complete' : 'blocked';
       ralphState.updatedAt = new Date().toISOString();
-      await appendJsonl(join(paths.projectOmgDir, 'logs', 'ralph.jsonl'), {
+      await appendJsonl(join(paths.projectLogsDir, 'ralph.jsonl'), {
         at: ralphState.updatedAt,
         kind: 'final-verification',
         commands: finalCommands,
         ok: allPassed,
       });
-      await writeJson(statePath, ralphState);
+      await appendRalphRuntimeTrace(paths, runtime, 'ralph-final-verification', {
+        ok: allPassed,
+        commands: finalCommands,
+      });
+      await syncRalphRuntimeState(paths, runtime, ralphState);
+      await writeRalphState(statePath, ralphState);
       return ralphState;
     }
 
     ralphState.iteration += 1;
     nextStep.status = 'in_progress';
     ralphState.stepAttempts[nextStep.id] = (ralphState.stepAttempts[nextStep.id] ?? 0) + 1;
+    ralphState.currentPhase = 'executing';
     ralphState.updatedAt = new Date().toISOString();
-    await writeJson(statePath, ralphState);
-    await writeText(join(paths.projectOmgDir, 'plan-current.md'), planToMarkdown(plan));
-    await writeJson(join(paths.projectOmgDir, 'plan-current.json'), plan);
+    await writeRalphState(statePath, ralphState);
+    await syncRalphRuntimeState(paths, runtime, ralphState, {
+      activeStepId: nextStep.id,
+      activeStepTitle: nextStep.title,
+    });
+    await writeText(paths.projectCurrentPlanMarkdownPath, planToMarkdown(plan));
+    await writeJson(paths.projectCurrentPlanJsonPath, plan);
 
     const execution = await runner.runPromptJson(
       buildRalphExecutePrompt(task, plan, nextStep, repoCommands, ralphState.iteration),
@@ -140,7 +187,9 @@ export async function runRalph(paths: OmgPaths, task: string, options: RalphOpti
       nextStep.status = 'blocked';
       decision = 'blocked';
       ralphState.status = 'blocked';
+      ralphState.currentPhase = 'blocked';
     } else {
+      ralphState.currentPhase = 'verifying';
       const commands = selectVerificationCommands(nextStep.verificationCommands, repoCommands.defaultVerification);
       verification = commands
         ? await verifyCommands(commands, paths.projectRoot)
@@ -157,9 +206,11 @@ export async function runRalph(paths: OmgPaths, task: string, options: RalphOpti
       } else if (ralphState.stepAttempts[nextStep.id] >= maxStepRetries) {
         nextStep.status = 'failed';
         ralphState.status = 'failed';
+        ralphState.currentPhase = 'blocked';
         decision = 'blocked';
       } else {
         nextStep.status = 'pending';
+        ralphState.currentPhase = 'executing';
         decision = 'retry';
       }
     }
@@ -177,16 +228,35 @@ export async function runRalph(paths: OmgPaths, task: string, options: RalphOpti
     };
     ralphState.history.push(record);
     ralphState.updatedAt = record.createdAt;
-    await appendJsonl(join(paths.projectOmgDir, 'logs', 'ralph.jsonl'), record);
-    await writeJson(statePath, ralphState);
+    await appendJsonl(join(paths.projectLogsDir, 'ralph.jsonl'), record);
+    await appendRalphRuntimeTrace(paths, runtime, 'ralph-iteration', {
+      iteration: record.iteration,
+      stepId: record.stepId,
+      attempt: record.attempt,
+      decision: record.decision,
+      changedFiles: record.changedFiles,
+    });
+    await syncRalphRuntimeState(paths, runtime, ralphState, {
+      activeStepId: record.stepId,
+      attempt: record.attempt,
+      decision: record.decision,
+    });
+    await writeRalphState(statePath, ralphState);
 
     if (decision === 'blocked') {
+      await syncRalphRuntimeState(paths, runtime, ralphState, {
+        blockedStepId: record.stepId,
+      });
       return ralphState;
     }
   }
 
   ralphState.status = 'blocked';
+  ralphState.currentPhase = 'blocked';
   ralphState.updatedAt = new Date().toISOString();
-  await writeJson(statePath, ralphState);
+  await syncRalphRuntimeState(paths, runtime, ralphState, {
+    reason: 'max-iterations-exhausted',
+  });
+  await writeRalphState(statePath, ralphState);
   return ralphState;
 }

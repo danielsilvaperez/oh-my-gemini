@@ -29,7 +29,17 @@ export async function runDoctor(paths: OmgPaths): Promise<DoctorCheck[]> {
     ['Extension manifest', join(paths.extensionRoot, 'gemini-extension.json')],
     ['Extension hooks', join(paths.extensionRoot, 'hooks', 'hooks.json')],
     ['Project state dir', paths.projectOmgDir],
+    ['Project context dir', paths.projectContextDir],
+    ['Project state snapshot dir', paths.projectStateDir],
+    ['Project plans dir', paths.projectPlansDir],
+    ['Project logs dir', paths.projectLogsDir],
+    ['Project team dir', paths.projectTeamDir],
+    ['Project artifacts dir', paths.projectArtifactsDir],
+    ['Project sessions dir', paths.projectSessionsDir],
+    ['Project memory', paths.projectMemoryPath],
+    ['Project notepad', paths.projectNotepadPath],
     ['Global OMG home', paths.globalHomeDir],
+    ['Global OMG state dir', paths.globalStateDir],
   ];
   for (const [label, target] of repoChecks) {
     const ok = await pathExists(target);
@@ -39,12 +49,31 @@ export async function runDoctor(paths: OmgPaths): Promise<DoctorCheck[]> {
   checks.push({ name: 'Project state writable', ok: await isWritableDir(paths.projectOmgDir), detail: paths.projectOmgDir, severity: 'info' });
   checks.push({ name: 'Global state writable', ok: await isWritableDir(paths.globalHomeDir), detail: paths.globalHomeDir, severity: 'info' });
 
-  const config = await readJson<{ extensionRoot?: string } | null>(join(paths.globalHomeDir, 'config.json'), null);
+  const config = await readJson<{ schemaVersion?: number; extensionRoot?: string } | null>(paths.globalConfigPath, null);
   checks.push({
     name: 'OMG config',
     ok: Boolean(config?.extensionRoot),
-    detail: config?.extensionRoot ? `Configured extension root: ${config.extensionRoot}` : 'Run `omg setup` to create config and link the extension.',
+    detail: config?.extensionRoot
+      ? `Configured extension root: ${config.extensionRoot}${config?.schemaVersion ? ` (schema v${config.schemaVersion})` : ''}`
+      : 'Run `omg setup` to create config and link the extension.',
     severity: config?.extensionRoot ? 'info' : 'warning',
+  });
+
+  checks.push({
+    name: 'Current plan pointer',
+    ok: await pathExists(paths.projectCurrentPlanMarkdownPath),
+    detail: await pathExists(paths.projectCurrentPlanMarkdownPath)
+      ? paths.projectCurrentPlanMarkdownPath
+      : 'No current plan yet. Run `omg plan "<task>"` to create one.',
+    severity: await pathExists(paths.projectCurrentPlanMarkdownPath) ? 'info' : 'warning',
+  });
+  checks.push({
+    name: 'Current test spec pointer',
+    ok: await pathExists(paths.projectCurrentTestSpecMarkdownPath),
+    detail: await pathExists(paths.projectCurrentTestSpecMarkdownPath)
+      ? paths.projectCurrentTestSpecMarkdownPath
+      : 'No current test spec yet. Run `omg plan "<task>"` to create one.',
+    severity: await pathExists(paths.projectCurrentTestSpecMarkdownPath) ? 'info' : 'warning',
   });
 
   return checks;

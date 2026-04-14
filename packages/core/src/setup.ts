@@ -10,7 +10,7 @@ interface GeminiExtensionManifest {
 }
 
 function projectGeminiTemplate(): string {
-  return `# OMG Project Context\n\nThis project is using OMG (oh-my-gemini) as its workflow/runtime layer.\n\n## Operator expectations\n- Prefer canonical OMG commands for durable workflows: /plan, /ralph, /team, /deep-interview.\n- Persist durable plans under .omg/plan-current.md and .omg/plan-current.json when you formalize work.\n- Keep major artifacts under .omg/plans/, .omg/artifacts/, and .omg/team/.\n- In HIGH mode, work step-by-step and verify every meaningful change before claiming completion.\n`;
+  return `# OMG Project Context\n\nThis project is using OMG (oh-my-gemini) as its workflow/runtime layer.\n\n## Operator expectations\n- Prefer canonical OMG commands for durable workflows: /plan, /ralph, /team, /deep-interview.\n- Persist durable plans under .omg/plan-current.md and .omg/plan-current.json when you formalize work.\n- Persist durable test intent under .omg/test-spec-current.md and .omg/test-spec-current.json.\n- Keep major artifacts under .omg/plans/, .omg/artifacts/, .omg/context/, .omg/state/, and .omg/team/.\n- Use .omg/project-memory.json and .omg/notepad.md for durable project/session context.\n- In HIGH mode, work step-by-step and verify every meaningful change before claiming completion.\n`;
 }
 
 export async function runSetup(paths: OmgPaths): Promise<DoctorCheck[]> {
@@ -27,11 +27,23 @@ export async function runSetup(paths: OmgPaths): Promise<DoctorCheck[]> {
   await ensureDir(extensionMirror);
   await copyRecursive(paths.extensionRoot, extensionMirror);
 
-  await writeJson(join(paths.globalHomeDir, 'config.json'), {
+  await writeJson(paths.globalConfigPath, {
+    schemaVersion: 1,
     installedAt: new Date().toISOString(),
     extensionRoot: paths.extensionRoot,
     extensionMirror,
     workspaceRoot: paths.workspaceRoot,
+    projectStateLayout: [
+      '.omg/context',
+      '.omg/state',
+      '.omg/plans',
+      '.omg/artifacts',
+      '.omg/team',
+      '.omg/project-memory.json',
+      '.omg/notepad.md',
+      '.omg/test-spec-current.md',
+      '.omg/test-spec-current.json',
+    ],
   });
 
   const linkHelperPath = join(paths.globalHomeDir, 'link-extension.sh');
@@ -60,6 +72,8 @@ exec gemini extensions link "$SCRIPT_DIR/extension"
   return [
     { name: 'Project .omg/ layout', ok: true, detail: paths.projectOmgDir },
     { name: 'Project .gemini/GEMINI.md', ok: true, detail: geminiMdPath },
+    { name: 'Project memory', ok: true, detail: paths.projectMemoryPath },
+    { name: 'Project notepad', ok: true, detail: paths.projectNotepadPath },
     { name: 'Extension mirror', ok: true, detail: extensionMirror },
     { name: 'Extension link helper', ok: true, detail: linkHelperPath },
     { name: 'Gemini extension link', ok: linkOk, detail: linkDetail, severity: linkOk ? 'info' : 'warning' },
