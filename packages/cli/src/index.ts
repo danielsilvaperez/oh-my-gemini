@@ -194,9 +194,11 @@ export async function runCli(argv = process.argv): Promise<void> {
       console.log(await renderHud(paths));
       return;
     }
+    const readline = await import('node:readline');
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      console.clear();
+      readline.cursorTo(process.stdout, 0, 0);
+      readline.clearScreenDown(process.stdout);
       console.log(await renderHud(paths));
       await new Promise((resolve) => setTimeout(resolve, 1200));
     }

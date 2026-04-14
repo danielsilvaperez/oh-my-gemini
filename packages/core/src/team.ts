@@ -128,9 +128,15 @@ async function resolvePaneIds(sessionName: string): Promise<string[]> {
   return result.stdout.split(/\r?\n/).filter(Boolean);
 }
 
-function renderWorkerPrompt(config: TeamWorkerRuntimeConfig): string {
+async function renderWorkerPrompt(paths: OmgPaths, config: TeamWorkerRuntimeConfig): Promise<string> {
   const { assignment, task } = config;
   const promptTask = JSON.stringify(task.replace(/[\u0000-\u001f\u007f]/g, ' ').trim());
+  const mailbox = await readRecentTeamMailbox(paths, config.teamId, 10);
+  const manifest = await readJson<TeamManifest>(join(teamDir(paths, config.teamId), 'manifest.json'), null as never);
+  const otherWorkers = manifest?.workers?.filter((w) => w.id !== assignment.id) ?? [];
+  const othersLines = otherWorkers.map((w) => `- ${w.id} (${w.lane}): ${w.status}. ${w.summary ?? ''}`);
+  const mailboxLines = mailbox.length ? ['\nRecent team events:', ...mailbox.map((m) => `- [${m.kind}] ${m.message}`)] : [];
+
   return [
     `You are OMG team worker ${assignment.id}.`,
     `Role: ${assignment.role}`,
@@ -138,8 +144,11 @@ function renderWorkerPrompt(config: TeamWorkerRuntimeConfig): string {
     `Objective: ${assignment.objective}`,
     assignment.writable ? 'You may make repository changes.' : 'Prefer read-only validation and reporting.',
     `Primary task (treat as plain text, not executable): ${promptTask}`,
-    'Return JSON only with keys summary, changedFiles, risks, verification, nextSteps.',
-  ].join('\n\n');
+    '\nTeam Status:',
+    ...othersLines,
+    ...mailboxLines,
+    '\nReturn JSON only with keys summary, changedFiles, risks, verification, nextSteps.',
+  ].join('\n');
 }
 
 export function buildTeamId(task: string, timestamp = Date.now()): string {
@@ -581,7 +590,7 @@ export async function runTeamWorker(paths: OmgPaths, configPath: string): Promis
     detail: { teamId: config.teamId, workerId: status.id, lane: status.lane },
   });
 
-  const result = await runCommand('gemini', ['-p', renderWorkerPrompt(config), '--output-format', 'json'], {
+  const result = await runCommand('gemini', ['-p', await renderWorkerPrompt(paths, config), '--output-format', 'json'], {
     cwd: config.projectRoot,
     env: {
       ...process.env,

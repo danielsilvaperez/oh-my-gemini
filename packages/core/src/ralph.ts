@@ -203,7 +203,21 @@ export async function runRalph(paths: OmgPaths, task: string, options: RalphOpti
       if (passed) {
         nextStep.status = 'completed';
         decision = plan.steps.every((step) => step.id === nextStep.id || step.status === 'completed') ? 'continue' : 'continue';
-      } else if (ralphState.stepAttempts[nextStep.id] >= maxStepRetries) {
+      } else if (ralphState.stepAttempts[nextStep.id] >= maxStepRetries && ralphState.stepAttempts[nextStep.id] <= maxStepRetries + 1) {
+        ralphState.currentPhase = 'executing';
+        const fixPrompt = `The step '${nextStep.title}' failed its verification commands repeatedly:\n\n${verification.map(v => `$ ${v.command}\n${v.stdout}\n${v.stderr}`).join('\n\n')}\n\nPlease act as a specialized debugger: analyze the failure, apply the necessary code changes to fix it, and return your summary.`;
+        try {
+          await runner.runPromptJson(
+            fixPrompt,
+            EXECUTION_SCHEMA,
+            { mode: 'high', retries: 1 }
+          );
+        } catch {
+          // Ignore runner errors during fix pass, let it fall through on next loop
+        }
+        nextStep.status = 'pending';
+        decision = 'retry';
+      } else if (ralphState.stepAttempts[nextStep.id] > maxStepRetries + 1) {
         nextStep.status = 'failed';
         ralphState.status = 'failed';
         ralphState.currentPhase = 'blocked';

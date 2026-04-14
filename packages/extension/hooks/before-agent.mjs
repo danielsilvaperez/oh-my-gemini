@@ -17,9 +17,20 @@ if (mode === 'high') {
 }
 const planPath = path.join(projectOmg, 'plan-current.md');
 const testSpecPath = path.join(projectOmg, 'test-spec-current.md');
+const notepadPath = path.join(projectOmg, 'notepad.md');
+const projectMemoryPath = path.join(projectOmg, 'project-memory.json');
+
+if (fs.existsSync(projectMemoryPath)) {
+  const memoryPreview = readTextPreview(projectMemoryPath, 4096, 50);
+  extra += `\n\nProject memory (conventions & directives):\n${memoryPreview}`;
+}
+if (fs.existsSync(notepadPath)) {
+  const notepadPreview = readTextPreview(notepadPath, 4096, 50);
+  extra += `\n\nTransient session notepad:\n${notepadPreview}`;
+}
 if (fs.existsSync(planPath)) {
   const planPreview = readTextPreview(planPath, 4096, 20);
-  extra += `Current plan preview:\n${planPreview}`;
+  extra += `\n\nCurrent plan preview:\n${planPreview}`;
 }
 if (fs.existsSync(testSpecPath)) {
   const testSpecPreview = readTextPreview(testSpecPath, 4096, 14);
