@@ -1,22 +1,57 @@
 {
-  "name": "oh-my-gemini",
-  "version": "1.0.0",
-  "private": true,
-  "description": "OMG (oh-my-gemini) \u2014 workflow/runtime layer for Gemini CLI",
+  "name": "@danielsilvaperez/oh-my-gemini",
+  "version": "0.0.0",
+  "description": "Workflow/runtime layer and extension bundle for Gemini CLI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danielsilvaperez/oh-my-gemini.git"
+  },
+  "homepage": "https://github.com/danielsilvaperez/oh-my-gemini#readme",
+  "bugs": {
+    "url": "https://github.com/danielsilvaperez/oh-my-gemini/issues"
+  },
+  "keywords": [
+    "gemini",
+    "gemini-cli",
+    "cli",
+    "extension",
+    "workflow",
+    "automation",
+    "tmux"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "bin": {
-    "omg": "./dist/packages/cli/bin/omg.js"
+    "omg": "./bin/omg.js"
+  },
+  "files": [
+    "bin/**",
+    "dist/**",
+    "packages/extension/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "clean": "rm -rf dist",
     "dev": "tsx packages/cli/bin/omg.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "npm run typecheck",
-    "test": "tsx --test packages/core/src/__tests__/*.test.ts"
+    "test": "tsx --test packages/core/src/__tests__/*.test.ts",
+    "pack:dry-run": "npm pack --dry-run",
+    "smoke:pack": "node scripts/smoke-pack.mjs",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm test && npm run typecheck && npm run build && npm run smoke:pack"
   },
   "dependencies": {
     "commander": "^14.0.1",

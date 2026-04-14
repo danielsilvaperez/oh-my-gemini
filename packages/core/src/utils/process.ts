@@ -4,6 +4,7 @@ import type { CommandResult } from '../types.js';
 interface RunOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  input?: string;
   shell?: boolean;
   timeoutMs?: number;
   stdio?: 'inherit' | 'pipe';
@@ -15,7 +16,9 @@ export async function runCommand(command: string, args: string[] = [], options: 
       cwd: options.cwd,
       env: options.env,
       shell: options.shell ?? false,
-      stdio: options.stdio === 'inherit' ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+      stdio: options.stdio === 'inherit'
+        ? 'inherit'
+        : [options.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
@@ -27,6 +30,9 @@ export async function runCommand(command: string, args: string[] = [], options: 
       if (timer) clearTimeout(timer);
       resolve({ command: [command, ...args].join(' '), code: code ?? 1, stdout, stderr });
     });
+    if (options.input !== undefined && child.stdin) {
+      child.stdin.end(options.input);
+    }
     if (options.timeoutMs && options.timeoutMs > 0) {
       timer = setTimeout(() => {
         child.kill('SIGTERM');

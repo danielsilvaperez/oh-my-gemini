@@ -20,18 +20,17 @@ packages/
   extension/  Gemini extension bundle (hooks, commands, skills)
 ```
 
-## Install
+## Install from npm
 
 ```bash
-npm install
-npm run build
+npm install -g @danielsilvaperez/oh-my-gemini
+# or:
+npx @danielsilvaperez/oh-my-gemini@latest setup
 ```
 
 ## Setup
 
 ```bash
-node dist/packages/cli/bin/omg.js setup
-# or, after linking/installing the package:
 omg setup
 ```
 
@@ -39,7 +38,33 @@ omg setup
 - creates `~/.omg/` and project `.omg/` directories
 - scaffolds project `.gemini/GEMINI.md` if missing
 - mirrors the packaged extension into `~/.omg/extension`
-- stages the extension bundle in `~/.omg/extension` and writes a helper script at `~/.omg/link-extension.sh`
+- validates and links the extension into Gemini CLI when `gemini` is available
+- writes a helper script at `~/.omg/link-extension.sh` for manual re-linking
+
+Use `omg setup --no-link` if you want to stage the extension without touching your Gemini CLI config.
+
+After install, you can confirm the packaged CLI version:
+
+```bash
+omg --version
+```
+
+## Verify install
+
+```bash
+omg doctor
+gemini extensions list
+```
+
+If the link is healthy, `doctor` will report `Gemini extension link` as passing and `gemini extensions list` will include `oh-my-gemini`.
+
+## Install from source
+
+```bash
+npm install
+npm run build
+node dist/packages/cli/bin/omg.js setup
+```
 
 ## Doctor
 
@@ -55,6 +80,7 @@ Checks:
 - extension assets present
 - project/global state writable
 - OMG config present
+- Gemini extension link health
 
 ## First run
 
@@ -190,3 +216,19 @@ The packaged extension includes:
 - OMG prefers extension/context-based behavior instead of forcing `GEMINI_SYSTEM_MD`, because Gemini’s system override is a full replacement of built-in firmware.
 - Team mode is intentionally lane-based in v1 to avoid unsafe multi-writer conflicts in the same checkout.
 - Extension hooks/commands depend on Gemini trusting the workspace and successfully loading the linked extension.
+
+## Publishing checklist
+
+Before publishing a release:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+npm run smoke:pack
+npm publish --access public
+```
+
+GitHub Actions automation is included:
+- `.github/workflows/ci.yml` runs test/typecheck/build/pack smoke checks on pushes and PRs
+- `.github/workflows/publish.yml` publishes to npm and creates a GitHub release when you push a `v*` tag (requires `NPM_TOKEN`)

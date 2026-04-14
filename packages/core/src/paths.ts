@@ -25,8 +25,22 @@ function findProjectRoot(start: string): string {
   }
 }
 
+function findWorkspaceRoot(start: string): string {
+  let current = resolve(start);
+  while (true) {
+    if (existsSync(join(current, 'packages', 'extension', 'gemini-extension.json'))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return findProjectRoot(start);
+    }
+    current = parent;
+  }
+}
+
 export function resolveOmgPaths(cwd = process.cwd()): OmgPaths {
-  const workspaceRoot = findProjectRoot(THIS_DIR);
+  const workspaceRoot = findWorkspaceRoot(THIS_DIR);
   const projectRoot = findProjectRoot(cwd);
   const projectOmgDir = join(projectRoot, '.omg');
   const globalHomeDir = join(homedir(), '.omg');

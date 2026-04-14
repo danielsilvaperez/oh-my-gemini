@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { DoctorCheck, OmgPaths } from './types.js';
+import { inspectGeminiExtensionLink } from './setup.js';
 import { isWritableDir, pathExists, readJson } from './utils/fs.js';
 
 export async function runDoctor(paths: OmgPaths): Promise<DoctorCheck[]> {
@@ -75,6 +76,8 @@ export async function runDoctor(paths: OmgPaths): Promise<DoctorCheck[]> {
       : 'No current test spec yet. Run `omg plan "<task>"` to create one.',
     severity: await pathExists(paths.projectCurrentTestSpecMarkdownPath) ? 'info' : 'warning',
   });
+
+  checks.push(await inspectGeminiExtensionLink(paths));
 
   return checks;
 }

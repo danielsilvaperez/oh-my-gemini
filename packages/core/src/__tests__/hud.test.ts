@@ -75,9 +75,9 @@ test('renderHud includes task, plan, and test spec summary', async () => {
 
   const hud = await renderHud(paths);
   assert.match(hud, /Task: ship parity/);
-  assert.match(hud, /Plan: 1\/2 complete/);
+  assert.match(hud, /Plan progress: .*1\/2/);
   assert.match(hud, /Test spec: 2 suite\(s\)/);
-  assert.match(hud, /Ralph: running \| phase executing \| iteration 2\/5/);
+  assert.match(hud, /Ralph loop: running \| phase: executing \| iteration: 2\/5/);
   assert.match(hud, /Recent session: cli @ 2026-01-01T00:00:00.000Z/);
 
   await rm(root, { recursive: true, force: true });

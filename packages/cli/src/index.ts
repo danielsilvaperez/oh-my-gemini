@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { join } from 'node:path';
+import packageJson from '../../../package.json' with { type: 'json' };
 import {
   GeminiRunner,
   OmgContext,
@@ -31,6 +32,7 @@ export async function runCli(argv = process.argv): Promise<void> {
   program
     .name('omg')
     .description('OMG — workflow/runtime layer for Gemini CLI')
+    .version(packageJson.version)
     .option('--smart', 'run in smart mode')
     .option('--madmax', 'run in madmax mode')
     .option('--high', 'run in high mode (ralph loop)')
@@ -70,9 +72,11 @@ export async function runCli(argv = process.argv): Promise<void> {
       console.log(output);
     });
 
-  program.command('setup').description('Initialize OMG global/project state and link the extension').action(async () => {
+  program.command('setup').description('Initialize OMG global/project state and link the extension')
+    .option('--no-link', 'skip Gemini extension validation/linking')
+    .action(async (options: { link?: boolean }) => {
     const paths = resolveOmgPaths(process.cwd());
-    printChecks(await runSetup(paths));
+    printChecks(await runSetup(paths, { linkExtension: options.link }));
   });
 
   program.command('doctor').description('Verify OMG runtime dependencies and state').action(async () => {
