@@ -28,7 +28,8 @@ function projectGeminiTemplate(): string {
 
 async function readLinkStatus(paths: OmgPaths, extensionMirror: string): Promise<GeminiLinkStatus> {
   const manifest = await readJson<GeminiExtensionManifest>(join(paths.extensionRoot, 'gemini-extension.json'), {});
-  const linkedExtensionPath = manifest.name ? join(homedir(), '.gemini', 'extensions', manifest.name) : undefined;
+  const home = process.env.HOME || homedir();
+  const linkedExtensionPath = manifest.name ? join(home, '.gemini', 'extensions', manifest.name) : undefined;
   if (!linkedExtensionPath) {
     return {
       manifestName: manifest.name,

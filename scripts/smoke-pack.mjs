@@ -32,7 +32,7 @@ function assertOk(result, context) {
 }
 
 async function main() {
-  const scratch = await mkdtemp(join(tmpdir(), 'omg-pack-'));
+  const scratch = await realpath(await mkdtemp(join(tmpdir(), 'omg-pack-')));
   const homeDir = join(scratch, 'home');
   const binDir = join(scratch, 'bin');
   const installDir = join(scratch, 'install');

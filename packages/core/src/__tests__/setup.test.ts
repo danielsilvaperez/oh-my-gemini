@@ -39,7 +39,7 @@ function fakePaths(root: string): OmgPaths {
 }
 
 test('runSetup stages and links the Gemini extension when gemini is available', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omg-setup-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'omg-setup-')));
   const paths = fakePaths(root);
   const binDir = join(root, 'bin');
   const homeDir = join(root, 'home');
