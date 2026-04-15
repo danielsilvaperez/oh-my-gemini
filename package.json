@@ -1,6 +1,6 @@
 {
   "name": "@danielsilvaperez/oh-my-gemini",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Workflow/runtime layer and extension bundle for Gemini CLI",
   "license": "MIT",
   "repository": {
